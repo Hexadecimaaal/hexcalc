@@ -7,3 +7,11 @@ edition = "2021"
 
 [dependencies]
 rp2040-hal = "*"
+alloc-cortex-m = "*"
+lazy_static = "*"
+
+[lib]
+name = "libhexcalc"
+path = "src/lib/mod.rs"
+test = true
+
