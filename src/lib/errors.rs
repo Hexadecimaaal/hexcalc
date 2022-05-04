@@ -1,5 +1,5 @@
 use crate::expr::Expr;
-use alloc::{ string::String };
+use alloc::string::String;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Error {
@@ -7,5 +7,5 @@ pub enum Error {
   NonRedux(Expr),
   EmptyStack(usize),
   Undefined(String),
-  Exists(String)
+  Exists(String),
 }
