@@ -1,6 +1,6 @@
 #![cfg_attr(not(test), no_std)]
+#![feature(box_syntax, box_patterns)]
 extern crate alloc;
-extern crate lazy_static;
 
 use alloc_cortex_m::CortexMHeap;
 #[cfg_attr(not(test), global_allocator)]

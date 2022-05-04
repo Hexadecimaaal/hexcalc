@@ -1,5 +1,5 @@
 use core::borrow::Borrow;
-use alloc::{ sync::Arc, string::String, vec::Vec };
+use alloc::{ boxed::Box, string::String, vec::Vec, vec };
 use crate::{ errors::Error, state::Stmt };
 
 #[derive(Clone, Copy)]
@@ -27,11 +27,15 @@ impl PartialEq for PValue {
 #[derive(Clone)]
 pub enum Primitive {
   V(PValue),
-  Fn11(Arc<dyn Send + Sync + Fn(PValue) -> PValue>),
-  Fn21(Arc<dyn Send + Sync + Fn(PValue, PValue) -> PValue>),
-  Fn12(Arc<dyn Send + Sync + Fn(PValue) -> (PValue, PValue)>),
-  Fn22(Arc<dyn Send + Sync + Fn(PValue, PValue) -> (PValue, PValue)>),
-  Fn31(Arc<dyn Send + Sync + Fn(PValue, PValue, PValue) -> PValue>)
+  Fn11(&'static fn(PValue) -> PValue),
+  Fn21(&'static fn(PValue, PValue) -> PValue),
+  Fn12(&'static fn(PValue) -> (PValue, PValue)),
+  Fn22(&'static fn(PValue, PValue) -> (PValue, PValue)),
+  Fn31(&'static fn(PValue, PValue, PValue) -> PValue)
+}
+
+impl From<PValue> for Primitive {
+  fn from(v : PValue) -> Self { Primitive::V(v) }
 }
 
 impl core::fmt::Debug for Primitive {
@@ -49,135 +53,125 @@ fn eq(&self, rhs: &Primitive) -> bool { match (self, rhs) {
 }}}
 
 
-
 #[derive(Clone, Debug, PartialEq)]
 pub enum Expr {
   P(Primitive),
-  Lam{bound : String, body : Arc<Expr>},
+  Lam(String, Box<Expr>),
   Var(String),
-  App{func : Arc<Expr>, val : Arc<Expr>},
+  App(Box<Expr>, Box<Expr>),
+  Cons(Box<Expr>, Box<Expr>), Fst, Snd,
   Program(Vec<Stmt>)
 }
 
+impl From<(Expr, Expr)> for Expr {
+  fn from((a, b): (Expr, Expr)) -> Self {
+    Expr::Cons(box a, box b)
+  }
+}
+
+impl From<Primitive> for Expr {
+  fn from(p : Primitive) -> Self {Expr::P(p)}
+}
+
+impl From<PValue> for Expr {
+  fn from(v : PValue) -> Self {Expr::P(v.into())}
+}
+
+impl From<String> for Expr {
+  fn from(s : String) -> Self {Expr::Var(s)}
+}
+
 impl Expr {
-  pub fn subst(self : &Arc<Self>, name : &String, to : &Arc<Self>) 
-  -> Result<Arc<Self>, Error> {
-    match self.borrow() {
-      Expr::P(_) => Ok(self.clone()),
-      Expr::Lam{bound, body} => 
-      if name == bound {Ok(self.clone())} else {
-        Ok(Arc::new(Expr::Lam{
-          bound : bound.clone(), 
-          body : body.subst(name, to)?
-        }))
+  pub fn subst(self, name : &String, to : &Self) 
+  -> Result<Self, Error> {
+    use Expr::*;
+    match self {
+      P(_) | Fst | Snd => Ok(self),
+      Lam(bound, body) => 
+      if *name == bound {Ok(Lam(bound, body))} else {
+        Ok(Lam(bound, box body.subst(name, to)?))
       }
-      Expr::Var(v) =>
-       if v == name {Ok(to.clone())} else {Ok(self.clone())}
-      Expr::App{func, val} => 
-        Ok(Arc::new(Expr::App{
-          func : func.subst(name, to)?, 
-          val : val.subst(name, to)?
-        })),
-      Expr::Program(v) => Ok(Arc::new(Expr::Program(
+      Var(ref v) =>
+       if v == name {Ok(to.clone())} else {Ok(self)}
+      App(func, val) => 
+        Ok(App(
+          box func.subst(name, to)?, 
+          box val.subst(name, to)?
+        )),
+      Program(v) => Ok(Program(
         v.iter().cloned().map(|s| match s {
           Stmt::Command(_) => Ok(s),
           Stmt::Push(e) => Ok(Stmt::Push(e.subst(name, to)?))
         }).into_iter().collect::<Result<Vec<Stmt>, Error>>()?
-      )))
+      )),
+      Cons(fst, snd) => Ok(Cons(
+        box fst.subst(name, to)?, 
+        box snd.subst(name, to)?
+      )),
     }
   }
 
-  pub fn red(self : &Arc<Self>) -> Result<Arc<Self>, Error> {
+  pub fn redux(&self) -> bool {
+    use Expr::*;
+    match self {
+        P(_) | Fst | Snd | Var(_) | Lam(_, _) => false,
+        App(box Lam(_, _), _) => true,
+        App(func, _) => func.redux(),
+        Cons(fst, snd) => fst.redux() || snd.redux(),
+        Program(_) => todo!(),
+    }
+  }
+
+  pub fn red(self) -> Result<Self, Error> {
     use Expr::*;
     use Primitive::*;
-
-    // ---
-    // I spent 3 hours on this s**t and gave up. never try to use
-    // `fn(..)` instead of `dyn Sync + Send + Fn(..)` ever again
-    // ---
-    //
-    // if let App {func, val} = self.borrow() {
-    //   match func.borrow() {
-    //     Lam {bound, body} => body.subst(bound, val),
-    //     P(Fn11(f)) => 
-    //     if let P(V(v)) = val.borrow() {
-    //       Ok(Arc::new(P(V(f(*v)))))
-    //     } else { Ok(Arc::new(App {func: func.clone(), val: val.red()?})) },
-    //     App{func: ifunc, val: ival} =>
-    //     //if let P(V(iv)) = ival.borrow() {
-    //       match ifunc.borrow() {
-    //         P(Fn21(f)) =>
-    //         if let P(V(v)) = val.borrow() {
-    //         if let P(V(iv)) = ival.borrow() {
-    //           Ok(Arc::new(P(V(f(*v, *iv)))))
-    //         } else { Ok(Arc::new(App {
-    //           func: Arc::new(
-    //             App {func: ifunc.clone(), val: ival.red()?}
-    //           ),
-    //           val: val.clone()
-    //         })) }
-    //         } else { Ok(Arc::new(App {func: func.clone(), val: val.red()?})) },
-    //         App{func: iifunc, val: iival} =>
-    //         match iifunc.borrow() {
-    //           P(Fn31(f)) =>
-    //           if let P(V(v)) = val.borrow() {
-    //           if let P(V(iv)) = ival.borrow() {
-    //           if let P(V(iiv)) = iival.borrow() {
-    //               Ok(Arc::new(P(V(f(*v, *iv, *iiv)))))
-    //           } else { Ok(Arc::new(App {
-    //             func: Arc::new(App {func: Arc::new( App {
-    //               func: iifunc.clone(),
-    //               val: iival.red()?
-    //             }), val: ival.clone()}),
-    //             val: val.clone()
-    //           })) }
-    //           } else { Ok(Arc::new(App {
-    //             func: Arc::new(App {func: ifunc.clone(), val: ival.red()?}),
-    //             val: val.clone()
-    //           })) }
-    //           } else { Ok(Arc::new(App {func: func.clone(), val: val.red()?})) },
-    //           _ => panic!()
-    //         },
-    //         _ => panic!()
-    //       }
-    //     //} else { Ok(Arc::new(App {func: })) },
-    //     _ => panic!()
-    //   }
-    //   // else if let P(V(v)) = val.borrow() {
-    //   //   match func.borrow() {
     
-    match self.borrow() {
-      App {func, val} => match func.borrow() {
-        P(p) => if let P(V(v)) = *val.clone() {
-          match p {
-            Fn11(f) => 
-              Ok(Arc::new(P(V((*f)(v))))),
-            Fn21(f) => {
-              let ff = f.clone();
-              Ok(Arc::new(P(Fn11(
-                Arc::new(move |x| ff(v, x))
-              ))))
-            },
-            Fn31(f) => {
-              let ff = f.clone();
-              Ok(Arc::new(P(Fn21(
-                Arc::new(move |x, y| ff(v, x, y))
-              ))))
-            },
-            _ => panic!() 
-          }
-        } else { Ok(Arc::new(App{func: func.clone(), val: val.red()?})) }
-        Lam{bound, body} => body.subst(bound, val),
-        _ => Ok(Arc::new(App{func : func.red()?, val: val.clone()}))
+    match self {
+      App(box func, box val) => match (func, val) {
+        (P(Fn11(f)), P(V(v))) => Ok(P(V((*f)(v)))),
+
+        (P(Fn21(f)), Cons(
+          box P(V(v1)), box P(V(v2)))) => {
+          Ok(P(V((*f)(v1, v2))))
+        },
+
+        (P(Fn12(f)), P(V(v))) => {
+          let (fst, snd) = (*f)(v);
+          Ok(Program(vec![
+            Stmt::Push(snd.into()), 
+            Stmt::Push(fst.into())]))
+        },
+
+        (P(Fn22(f)), Cons(
+          box P(V(v1)), box P(V(v2)))) => {
+          let (fst, snd) = (*f)(v1, v2);
+          Ok(Program(vec![
+            Stmt::Push(snd.into()), 
+            Stmt::Push(fst.into())]))
+        },
+
+        (P(p), val) => Ok(App(box P(p), box val.red()?)),
+
+        (Lam(ref bound, body), val) => body.subst(bound, &val),
+
+        (Fst, Cons(box fst, _)) => Ok(fst),
+        (Snd, Cons(_, box snd)) => Ok(snd),
+
+        (func, val) => Ok(App(box func.red()?, box val))
       },
-      _ => Err(Error::NonRedux(self.clone()))
+
+      Cons(fst, snd) => if fst.redux() {
+        Ok(Cons(box fst.red().unwrap(), snd))
+      } else { Ok(Cons(fst, box snd.red()?)) },
+
+      _ => Err(Error::NonRedux(self)),
     }
 
   }
 
   #[inline]
-  pub fn simpl(self : &Arc<Self>) -> Arc<Self> {
-    self.red()
-    .map_or_else(|_|self.clone(), |res| res.simpl())
+  pub fn simpl(self : Self) -> Self {
+    let old = self.clone();
+    self.red().map_or(old, |res| res.simpl())
   }
 }

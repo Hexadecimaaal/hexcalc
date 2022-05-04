@@ -1,10 +1,10 @@
 use crate::expr::Expr;
-use alloc::{ sync::Arc, string::String };
+use alloc::{ string::String };
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Error {
   Type,
-  NonRedux(Arc<Expr>),
+  NonRedux(Expr),
   EmptyStack(usize),
   Undefined(String),
   Exists(String)

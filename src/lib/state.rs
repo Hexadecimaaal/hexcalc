@@ -1,20 +1,19 @@
 use alloc::{ 
   collections::{ BTreeMap },
   vec::Vec,
-  sync::Arc,
   string::String
 };
 use crate::{ expr::Expr, errors::Error };
 
 #[derive(Debug, Clone)]
-pub struct Stack(Vec<Arc<Expr>>);
+pub struct Stack(Vec<Expr>);
 
 impl Stack {
-  #[inline] pub fn pop(&mut self) -> Result<Arc<Expr>, Error> {
+  #[inline] pub fn pop(&mut self) -> Result<Expr, Error> {
     self.0.pop().ok_or(Error::EmptyStack(1))
   }
 
-  #[inline] pub fn push(&mut self, e : Arc<Expr>) {
+  #[inline] pub fn push(&mut self, e : Expr) {
     self.0.push(e)
   }
 
@@ -37,14 +36,14 @@ impl Stack {
   }
 
   #[inline] pub fn pop_n(&mut self, n : usize) 
-  -> Result<Vec<Arc<Expr>>, Error> {
+  -> Result<Vec<Expr>, Error> {
     let err  = Err(Error::EmptyStack(n));
     if n > self.0.len() { err } else {
       Ok(self.0.split_off(self.0.len() - n))
     }
   }
 
-  #[inline] pub fn push_n(&mut self, mut e : Vec<Arc<Expr>>) {
+  #[inline] pub fn push_n(&mut self, mut e : Vec<Expr>) {
     self.0.append(&mut e);
   }
 
@@ -76,7 +75,7 @@ impl Stack {
     self.rotate_down(n, 1)
   }
 
-  #[inline] pub fn at(&self, n : usize) -> Result<Arc<Expr>, Error> {
+  #[inline] pub fn at(&self, n : usize) -> Result<Expr, Error> {
     let err = Err(Error::EmptyStack(n));
     if n > self.0.len() { err } else {
       Ok(self.0[self.0.len() - n].clone())
@@ -96,27 +95,27 @@ impl Stack {
 
 
 #[derive(Debug, Clone)]
-pub struct Context(BTreeMap<String, Arc<Expr>>);
+pub struct Context(BTreeMap<String, Expr>);
 
 impl Context {
-  #[inline] pub fn get(&self, name : &String) -> Result<Arc<Expr>, Error> {
+  #[inline] pub fn get(&self, name : &String) -> Result<Expr, Error> {
     self.0.get(name).ok_or(Error::Undefined(name.clone()))
       .map(|arc| arc.clone())
   }
 
-  #[inline] pub fn sto(&mut self, name : &String, val : Arc<Expr>)
-  -> Option<Arc<Expr>>{
+  #[inline] pub fn sto(&mut self, name : &String, val : Expr)
+  -> Option<Expr>{
     self.0.insert(name.clone(), val)
   }
 
-  #[inline] pub fn try_sto(&mut self, name : &String, val : Arc<Expr>)
+  #[inline] pub fn try_sto(&mut self, name : &String, val : Expr)
   -> Result<(), Error> {
     if self.0.contains_key(name) { Err(Error::Exists(name.clone())) }
     else { self.0.insert(name.clone(), val); Ok(()) }
   }
 
   #[inline] pub fn purge(&mut self, name : &String) 
-  -> Result<Arc<Expr>, Error> {
+  -> Result<Expr, Error> {
     self.0.remove(name).ok_or(Error::Undefined(name.clone()))
   }
 }
@@ -124,8 +123,8 @@ impl Context {
 
 #[derive(Clone)]
 pub enum Stmt {
-  Push(Arc<Expr>),
-  Command(Arc<dyn Send + Sync + Fn(&mut State) -> Result<(), Error>>)
+  Push(Expr),
+  Command(&'static fn(&mut State) -> Result<(), Error>)
 }
 
 impl core::fmt::Debug for Stmt {
@@ -137,8 +136,13 @@ impl core::fmt::Debug for Stmt {
 }
 
 impl PartialEq for Stmt {
-  fn eq(&self, rhs: &Self) -> bool {
-    self as *const _ == rhs as *const _
+  fn eq(&self, rhs: &Self) -> bool { 
+    use Stmt::*;
+    match (self, rhs) {
+      (Push(a), Push(b)) => a == b,
+      (Command(a), Command(b)) => (a as *const _) == (b as *const _),
+      _ => false
+    }
   }
 }
 
@@ -151,6 +155,18 @@ impl State {
     match c {
       Push(e) => Ok(self.0.push(e)),
       Command(c) => c(self)
+    }
+  }
+
+  pub fn apply(&mut self) -> Result<(), Error> {
+    match self.0.pop()? {
+      Expr::Program(p) => Ok(for i in p {
+        self.eval(i)?
+      }),
+      fun => {
+        let top = self.0.pop()?;
+        self.eval(Stmt::Push(Expr::App(box fun, box top)))
+      }
     }
   }
 }

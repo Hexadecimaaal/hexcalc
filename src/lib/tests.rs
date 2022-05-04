@@ -1,93 +1,64 @@
 #[cfg(test)]
+#[allow(non_snake_case)]
 mod expr {
-
+  use crate::state::Stmt;
   use crate::expr::*;
   use Expr::*;
   use Primitive::*;
-  use alloc::sync::Arc;
 
   fn iplus(lhs : PValue, rhs : PValue) -> PValue {
     unsafe { PValue{ i : lhs.i + rhs.i } }
   }
 
-  lazy_static::lazy_static! {
-    pub static ref A : Arc<Expr> = Arc::new(Var("a".to_string()));
-    pub static ref B : Arc<Expr> = Arc::new(Var("b".to_string()));
-    pub static ref X : Arc<Expr> = Arc::new(Var("x".to_string()));
-    pub static ref Y : Arc<Expr> = Arc::new(Var("y".to_string()));
-
-    pub static ref EXPR0 : Arc<Expr> = Arc::new(Lam { // \y. x
-      bound : "y".to_string(),
-      body : X.clone()
-    });
-
-    pub static ref EXPR1 : Arc<Expr> = Arc::new(Lam { // \x. \y. x
-      bound : "x".to_string(),
-      body : EXPR0.clone()
-    });
-
-    pub static ref EXPR2 : Arc<Expr> = Arc::new(App { // (\x. \y. x) a
-      func : EXPR1.clone(),
-      val : A.clone()
-    });
-
-    pub static ref EXPR3 : Arc<Expr> = Arc::new(App { // (\x. \y. x) b
-      func : EXPR1.clone(),
-      val : B.clone()
-    });
-
-    pub static ref EXPR4 : Arc<Expr> = Arc::new(App { // (\x. \y. x) a b
-      func : EXPR2.clone(),
-      val : B.clone()
-    });
-
-    pub static ref IPLUS : Arc<Expr> =
-      Arc::new(P(Fn21(Arc::new(iplus))));
-
-    pub static ref IZERO : Arc<Expr> =
-      Arc::new(P(V(PValue {i : 0})));
-
-    pub static ref IONE : Arc<Expr> =
-      Arc::new(P(V(PValue {i : 1})));
-
-    pub static ref ITWO : Arc<Expr> =
-      Arc::new(P(V(PValue {i : 2})));
-
-    pub static ref IONE_PLUS : Arc<Expr> = Arc::new(App {
-      func : IPLUS.clone(),
-      val : IONE.clone()
-    });
-
-    pub static ref IONE_PLUS_ONE : Arc<Expr> = Arc::new(App {
-      func : IONE_PLUS.clone(),
-      val : IONE.clone()
-    });
-
-    pub static ref IONE_PLUS_ZERO : Arc<Expr> = Arc::new(App {
-      func : IONE_PLUS.clone(),
-      val : IZERO.clone()
-    });
-
+  fn idivmod(lhs : PValue, rhs : PValue) -> (PValue, PValue) {
+    unsafe { (PValue{i: lhs.i / rhs.i}, PValue{i: lhs.i % rhs.i}) }
   }
 
   #[test]
-  fn subst() {
-    assert_eq!(*EXPR2.subst(&"a".to_string(), &B).unwrap(), **EXPR3);
-    assert_eq!(*EXPR2.subst(&"x".to_string(), &Y).unwrap(), **EXPR2);
-  }
+  fn expr_eval() {
+    let A : Box<Expr> = box Var("a".to_string());
+    let B : Box<Expr> = box Var("b".to_string());
+    let X : Box<Expr> = box Var("x".to_string());
+    let Y : Box<Expr> = box Var("y".to_string());
+  
+    let EXPR0 : Box<Expr> = box Lam("y".into(), X.clone());
+    let EXPR1 : Box<Expr> = box Lam("x".into(), EXPR0.clone()); // \x. \y. x
+  
+    let EXPR2 : Box<Expr> = box App(EXPR1.clone(), A.clone()); // (\x. \y. x) a
+    let EXPR3 : Box<Expr> = box App(EXPR1.clone(), B.clone()); // (\x. \y. x) b
+    let EXPR4 : Box<Expr> = box App(EXPR2.clone(), B.clone()); // (\x. \y. x) a b
+  
+    let IPLUS : Box<Expr> = box P(Fn21(&(iplus as fn(_, _) -> _)));
+    let IZERO : Box<Expr> = box PValue {i : 0}.into();
+    let IONE : Box<Expr> = box PValue {i : 1}.into();
+    let ITWO : Box<Expr> = box PValue {i : 2}.into();
+    let IDIVMOD : Box<Expr> = box P(Fn22(&(idivmod as fn(_, _) -> (_, _))));
+    let IN15 : Box<Expr> = box PValue {i : 15}.into();
+    let IN31 : Box<Expr> = box PValue {i : 31}.into();
 
-  #[test]
-  fn red() {
-    assert_eq!(*EXPR4.red().unwrap().red().unwrap(), *A.clone());
-  }
+    let IONE_PLUS_ONE : Box<Expr> = box App(
+      IPLUS.clone(), box Cons(IONE.clone(), IONE.clone())
+    );
+    let IONE_PLUS_ZERO : Box<Expr> = box App(
+      IPLUS.clone(), box Cons(IONE.clone(), IZERO.clone())
+    );
 
-  #[test]
-  fn simpl() {
-    assert_eq!(*EXPR4.simpl(), *A.clone());
-  }
+    let IN31_DIVMOD_TWO : Box<Expr> = box App(
+      IDIVMOD.clone(), box Cons(IN31.clone(), ITWO.clone())
+    );
+    let PRGM_IONE_IN15 : Box<Expr> = box Program(vec![
+      Stmt::Push(*IONE.clone()),
+      Stmt::Push(*IN15.clone())
+    ]);
 
-  #[test]
-  fn primitive() {
-    assert_eq!(*IONE_PLUS_ONE.simpl(), *ITWO.clone())
+    assert_eq!(EXPR2.clone().subst(&"a".to_string(), &B).unwrap(), *EXPR3);
+    assert_eq!(EXPR2.clone().subst(&"x".to_string(), &Y).unwrap(), *EXPR2);
+
+    assert_eq!(EXPR4.clone().red().unwrap().red().unwrap(), *A);
+
+    assert_eq!(EXPR4.simpl(), *A);
+    assert_eq!(IONE_PLUS_ONE.simpl(), *ITWO);
+    assert_eq!(IONE_PLUS_ZERO.simpl(), *IONE);
+    assert_eq!(IN31_DIVMOD_TWO.simpl(), *PRGM_IONE_IN15)
   }
 }
