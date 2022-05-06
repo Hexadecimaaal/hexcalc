@@ -1,5 +1,6 @@
-#![cfg_attr(not(test), no_std)]
+#![no_std]
 #![feature(box_syntax, box_patterns)]
+#![feature(wrapping_int_impl)]
 extern crate alloc;
 
 use alloc_cortex_m::CortexMHeap;
@@ -9,6 +10,7 @@ static ALLOCATOR : CortexMHeap = CortexMHeap::empty();
 
 pub mod errors;
 pub mod expr;
+pub mod intrinsics;
 pub mod state;
 
 pub mod tests;

@@ -6,11 +6,10 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-rp2040-hal = "*"
-alloc-cortex-m = "*"
+rp-pico = "0.3.0"
+alloc-cortex-m = "0.4.2"
 
 [lib]
 name = "libhexcalc"
 path = "src/lib/mod.rs"
 test = true
-

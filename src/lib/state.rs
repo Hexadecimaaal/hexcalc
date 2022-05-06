@@ -2,7 +2,7 @@ use crate::{errors::Error, expr::Expr};
 use alloc::{collections::BTreeMap, string::String, vec::Vec};
 
 #[derive(Debug, Clone)]
-pub struct Stack(Vec<Expr>);
+pub struct Stack(pub Vec<Expr>);
 
 impl Stack {
   #[inline]
@@ -88,7 +88,7 @@ impl Stack {
 }
 
 #[derive(Debug, Clone)]
-pub struct Context(BTreeMap<String, Expr>);
+pub struct Context(pub BTreeMap<String, Expr>);
 
 impl Context {
   #[inline]
@@ -149,7 +149,7 @@ impl PartialEq for Stmt {
 }
 
 #[derive(Debug, Clone)]
-pub struct State(Stack, Context);
+pub struct State(pub Stack, pub Context);
 
 impl State {
   pub fn eval(&mut self, c : Stmt) -> Result<(), Error> {

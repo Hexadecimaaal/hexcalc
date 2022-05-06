@@ -4,7 +4,9 @@
   inputs = {
     nixpkgs.url      = "github:nixos/nixpkgs/nixos-unstable";
     rust-overlay.url = "github:oxalica/rust-overlay";
+    rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
     flake-utils.url  = "github:numtide/flake-utils";
+    flake-utils.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs = { self, nixpkgs, rust-overlay, flake-utils, ... }:
@@ -19,15 +21,12 @@
       {
         devShell = mkShell {
           buildInputs = [
-            lldb
             openssl
             pkgconfig
-            gdb
-            (rust-bin.selectLatestNightlyWith (toolchain: toolchain.default.override {
-                extensions = [ "rust-src" ];
-                targets = ["thumbv6m-none-eabi"];
-              }
-            ))
+            (rust-bin.nightly."2021-11-01".default.override {
+              extensions = [ "rust-src" ];
+              targets = ["thumbv6m-none-eabi"];
+            })
             (openocd.overrideAttrs (old: {
               src = fetchFromGitHub {
                 owner = "raspberrypi";
