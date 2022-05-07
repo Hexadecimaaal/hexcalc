@@ -5,10 +5,12 @@ use alloc::{collections::BTreeMap, string::String, vec};
 use crate::{
   errors::Error,
   expr::{Expr, Word64},
-  state::{Context, Stack, State, Stmt},
+  state::{State, Stmt, Variables},
 };
 
-fn generate_intrinsics() -> BTreeMap<String, Stmt> {
+use num_traits::real::Real;
+
+pub fn generate_intrinsics() -> Variables {
   use Expr::*;
   use Stmt::*;
   let mut intr = BTreeMap::<String, Stmt>::new();
@@ -37,7 +39,7 @@ fn generate_intrinsics() -> BTreeMap<String, Stmt> {
       }
       intr.insert(
         stringify!($fun).to_uppercase(),
-        Command(&(sub as fn(&mut _) -> _)),
+        Command(&($fun as fn(&mut _) -> _)),
       )
     };
   }
@@ -56,8 +58,17 @@ fn generate_intrinsics() -> BTreeMap<String, Stmt> {
       }
       intr.insert(
         stringify!($fun).to_uppercase(),
-        Command(&(sub as fn(&mut _) -> _)),
+        Command(&($fun as fn(&mut _) -> _)),
       )
+    };
+  }
+
+  macro_rules! state_stmt {
+    ($fun:ident = $stmt:expr) => {
+      intr.insert(
+        stringify!($fun).to_uppercase(),
+        Command(&($stmt as fn(&mut _) -> _)),
+      );
     };
   }
 
@@ -83,5 +94,35 @@ fn generate_intrinsics() -> BTreeMap<String, Stmt> {
   unary_word_op!(sign = a -> Word64 { i : unsafe { a.i.signum() }});
   unary_word_op!(rev = a -> Word64 { u : unsafe { a.u.reverse_bits() }});
 
-  intr
+  binary_word_op!(fplus = a b -> Word64 { f : unsafe { a.f + b.f } });
+  binary_word_op!(fsub = a b -> Word64 { f : unsafe { a.f - b.f } });
+  binary_word_op!(fmul = a b -> Word64 { f : unsafe { a.f * b.f } });
+  binary_word_op!(fdiv = a b -> Word64 { f : unsafe { a.f / b.f } });
+  binary_word_op!(frem = a b -> Word64 { f : unsafe { a.f % b.f } });
+  binary_word_op!(fpow = a b -> Word64 { f : unsafe { a.f.powf(b.f) } });
+
+  unary_word_op!(fchs = a -> Word64 { f : unsafe { -a.f }});
+  unary_word_op!(finc = a -> Word64 { f : unsafe { a.f + 1.0 }});
+  unary_word_op!(fdec = a -> Word64 { f : unsafe { a.f - 1.0 }});
+  unary_word_op!(fsgn = a -> Word64 { f : unsafe { a.f.signum() }});
+  unary_word_op!(sqrt = a -> Word64 { f : unsafe { a.f.sqrt() }});
+  unary_word_op!(exp = a -> Word64 { f : unsafe { a.f.exp() }});
+  unary_word_op!(ln = a -> Word64 { f : unsafe { a.f.ln() }});
+
+  state_stmt!(drop = State::drop);
+  state_stmt!(dup = State::dup);
+  state_stmt!(swap = State::swap);
+  state_stmt!(dropn = State::dropn);
+  state_stmt!(roll = State::roll);
+  state_stmt!(rolld = State::rolld);
+  state_stmt!(rot = State::rot);
+  state_stmt!(pick = State::pick);
+  state_stmt!(over = State::over);
+
+  state_stmt!(sto = State::sto);
+  state_stmt!(rcl = State::rcl);
+  state_stmt!(exch = State::exch);
+  state_stmt!(purge = State::purge);
+
+  Variables(intr)
 }

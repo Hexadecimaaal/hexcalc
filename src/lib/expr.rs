@@ -1,6 +1,6 @@
 use crate::{errors::Error, state::Stmt};
-use alloc::{boxed::Box, fmt::Display, string::String, vec, vec::Vec};
-use core::{borrow::Borrow, num::Wrapping, panic};
+use alloc::{boxed::Box, fmt::Display, format, string::String, vec, vec::Vec};
+use core::{num::Wrapping, panic};
 
 #[derive(Clone, Copy)]
 pub union Word64 {
@@ -15,46 +15,50 @@ impl core::fmt::Debug for Word64 {
   }
 }
 
+impl core::fmt::Display for Word64 {
+  fn fmt(&self, f : &mut core::fmt::Formatter<'_>) -> Result<(), core::fmt::Error> {
+    self.format_u().fmt(f)
+  }
+}
+
 impl PartialEq for Word64 {
   fn eq(&self, rhs : &Self) -> bool { unsafe { self.u == rhs.u } }
 }
 
-// #[derive(Clone)]
-// pub enum Primitive {
-//   V(PValue),
-//   Fn11(&'static fn(PValue) -> PValue),
-//   Fn21(&'static fn(PValue, PValue) -> PValue),
-//   Fn12(&'static fn(PValue) -> (PValue, PValue)),
-//   Fn22(&'static fn(PValue, PValue) -> (PValue, PValue)),
-//   Fn31(&'static fn(PValue, PValue, PValue) -> PValue),
-// }
-
-// impl From<PValue> for Primitive {
-//   fn from(v : PValue) -> Self { Primitive::V(v) }
-// }
-
-// impl core::fmt::Debug for Primitive {
-//   fn fmt(&self, f : &mut core::fmt::Formatter<'_>) -> Result<(),
-// core::fmt::Error> {     match self {
-//       Primitive::V(v) => write!(f, "{:?}", v)?,
-//       _ => write!(
-//         f,
-//         "#(function at {:?})",
-//         self.borrow() as *const Primitive as usize
-//       )?,
-//     }
-//     Ok(())
-//   }
-// }
-
-// impl core::cmp::PartialEq for Primitive {
-//   fn eq(&self, rhs : &Primitive) -> bool {
-//     match (self, rhs) {
-//       (Primitive::V(v1), Primitive::V(v2)) => v1 == v2,
-//       _ => self as *const _ == rhs as *const _,
-//     }
-//   }
-// }
+impl Word64 {
+  fn format_i(&self) -> String {
+    let i = unsafe { self.i };
+    if i >= Wrapping(0) {
+      format!("0+{:X}", i)
+    } else {
+      format!("0-{:X}", i)
+    }
+  }
+  fn format_u(&self) -> String { format!("{:#X}", unsafe { self.u }) }
+  fn format_f(&self) -> String {
+    let u = unsafe { self.u }.0;
+    let frac = u << 12 >> 12;
+    let exp = (u >> 52 & !(1 << 12)) as i16 - 1023;
+    let frac_format = format!("{:X}", frac);
+    let sig_text = if (u >> 63) != 0 { "0-" } else { "0+" };
+    if exp == -1023 {
+      format!("{}0.{}", sig_text, frac_format.trim_end_matches('0'))
+    } else if exp == 1024 {
+      if frac == 0 {
+        format!("{}INF", sig_text)
+      } else {
+        format!("{}{}NAN", sig_text, frac_format.trim_end_matches('0'))
+      }
+    } else {
+      format!(
+        "{}1.{}{:+X}",
+        sig_text,
+        frac_format.trim_end_matches('0'),
+        exp
+      )
+    }
+  }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Expr {
@@ -75,24 +79,26 @@ pub enum Expr {
   Inr(Box<Expr>),
 
   Program(Vec<Stmt>),
+
+  Unit,
 }
 
 impl Display for Expr {
   fn fmt(&self, f : &mut alloc::fmt::Formatter<'_>) -> alloc::fmt::Result {
     match self {
-      // Expr::P(_) => todo!(),
       Expr::Lam(bound, body) => write!(f, "λ{}. {}", bound, body),
       Expr::Var(v) => write!(f, "{}", v),
       Expr::App(func, val) => write!(f, "({} {})", func, val),
       Expr::Cons(lhs, rhs) => write!(f, "{{{} {}}}", lhs, rhs),
       Expr::Fst(e) => write!(f, "{}.0", e),
       Expr::Snd(e) => write!(f, "{}.1", e),
-      Expr::Match(with, inl, inr) => write!(f, "match {} in {} | {}", with, inl, inr),
+      Expr::Match(with, inl, inr) => write!(f, "match {} with {} | {} end", with, inl, inr),
       Expr::Inl(e) => write!(f, "{}:0", e),
       Expr::Inr(e) => write!(f, "{}:1", e),
       Expr::Program(p) => todo!(),
-      Expr::Word(_) => todo!(),
-      Expr::Text(_) => todo!(),
+      Expr::Word(w) => w.fmt(f),
+      Expr::Text(t) => t.fmt(f),
+      Expr::Unit => write!(f, "*"),
     }
   }
 }
@@ -101,19 +107,40 @@ impl Display for Expr {
 //   fn from((a, b) : (Expr, Expr)) -> Self { Expr::Cons(box a, box b) }
 // }
 
-// impl From<PValue> for Expr {
-//   fn from(v : PValue) -> Self { Expr::P(v.into()) }
-// }
+impl From<Word64> for Expr {
+  fn from(v : Word64) -> Self { Expr::Word(v) }
+}
+
+impl From<i64> for Expr {
+  fn from(v : i64) -> Self { Expr::Word(Word64 { i : Wrapping(v) }) }
+}
+
+impl From<u64> for Expr {
+  fn from(v : u64) -> Self { Expr::Word(Word64 { u : Wrapping(v) }) }
+}
+
+impl From<f64> for Expr {
+  fn from(v : f64) -> Self { Expr::Word(Word64 { f : v }) }
+}
+
+impl From<Stmt> for Expr {
+  fn from(s : Stmt) -> Self {
+    match s {
+      Stmt::Push(e) => e,
+      _ => Expr::Program(vec![s]),
+    }
+  }
+}
 
 // impl From<String> for Expr {
 //   fn from(s : String) -> Self { Expr::Var(s) }
 // }
 
 impl Expr {
-  pub fn subst(self, name : &String, to : &Self) -> Result<Self, Error> {
+  pub fn subst(self, name : &str, to : &Self) -> Result<Self, Error> {
     use Expr::*;
     match self {
-      Text(_) | Word(_) => Ok(self),
+      Text(_) | Word(_) | Unit => Ok(self),
       Lam(bound, body) => {
         if *name == bound {
           Ok(Lam(bound, body))
@@ -130,13 +157,11 @@ impl Expr {
       }
       App(func, val) => Ok(App(box func.subst(name, to)?, box val.subst(name, to)?)),
       Program(v) => Ok(Program(
-        v.iter()
-          .cloned()
+        v.into_iter()
           .map(|s| match s {
             Stmt::Command(_) => Ok(s),
             Stmt::Push(e) => Ok(Stmt::Push(e.subst(name, to)?)),
           })
-          .into_iter()
           .collect::<Result<Vec<Stmt>, Error>>()?,
       )),
       Cons(fst, snd) => Ok(Cons(box fst.subst(name, to)?, box snd.subst(name, to)?)),
@@ -152,7 +177,7 @@ impl Expr {
   pub fn redux(&self) -> bool {
     use Expr::*;
     match self {
-      Word(_) | Text(_) | Var(_) | Lam(..) | Program(_) => false,
+      Word(_) | Text(_) | Var(_) | Lam(..) | Program(_) | Unit => false,
       App(box Lam(..), _) => true,
       App(func, _) => func.redux(),
       Cons(fst, snd) => fst.redux() || snd.redux(),
@@ -165,31 +190,9 @@ impl Expr {
 
   pub fn red(self) -> Result<Self, Error> {
     use Expr::*;
-    // use Primitive::*;
 
     match self {
       App(box func, box val) => match (func, val) {
-        // (P(Fn11(f)), P(V(v))) => Ok(P(V((*f)(v)))),
-
-        // (P(Fn21(f)), Cons(box P(V(v1)), box P(V(v2)))) => Ok(P(V((*f)(v1, v2)))),
-
-        // (P(Fn12(f)), P(V(v))) => {
-        //   let (fst, snd) = (*f)(v);
-        //   Ok(Program(vec![
-        //     Stmt::Push(snd.into()),
-        //     Stmt::Push(fst.into()),
-        //   ]))
-        // }
-
-        // (P(Fn22(f)), Cons(box P(V(v1)), box P(V(v2)))) => {
-        //   let (fst, snd) = (*f)(v1, v2);
-        //   Ok(Program(vec![
-        //     Stmt::Push(snd.into()),
-        //     Stmt::Push(fst.into()),
-        //   ]))
-        // }
-
-        // (P(p), val) => Ok(App(box P(p), box val.red()?)),
         (Lam(ref bound, body), val) => body.subst(bound, &val),
 
         (func, val) => Ok(App(box func.red()?, box val)),

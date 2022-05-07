@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 rp-pico = "0.3.0"
 alloc-cortex-m = "0.4.2"
+num-traits = { version = "0.2.15", default-features = false, features = ["libm"] }
 
 [lib]
 name = "libhexcalc"

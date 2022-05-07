@@ -8,4 +8,5 @@ pub enum Error {
   EmptyStack(usize),
   Undefined(String),
   Exists(String),
+  Range(usize, usize),
 }

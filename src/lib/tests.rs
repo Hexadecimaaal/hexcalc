@@ -1,17 +1,15 @@
 #[cfg(test)]
 #[allow(non_snake_case)]
 mod expr {
+  use core::num::Wrapping;
+
   use crate::expr::*;
-  use crate::state::Stmt;
+  use crate::state::{Stack, State, Stmt, Variables};
   use alloc::boxed::Box;
   use alloc::string::ToString;
   use alloc::vec;
   use Expr::*;
   // use Primitive::*;
-
-  fn idivmod(lhs : Word64, rhs : Word64) -> (Word64, Word64) {
-    unsafe { (Word64 { i : lhs.i / rhs.i }, Word64 { i : lhs.i % rhs.i }) }
-  }
 
   #[test]
   fn expr_eval() {
@@ -55,7 +53,7 @@ mod expr {
   }
 
   #[test]
-  fn arith_constructions() {
+  fn algebra_constructions() {
     let A = box Var("a".to_string());
     let B = box Var("b".to_string());
     let X = box Var("x".to_string());
@@ -65,5 +63,43 @@ mod expr {
     let EXPR1 = box Inl(EXPR0.clone());
     let EXPR2 = box Inr(EXPR0.clone());
     let EXPR3 = box Cons(X.clone(), EXPR0.clone());
+  }
+
+  #[test]
+  fn intrinsics_arith() {
+    let mut state = State(Stack(vec![]), crate::intrinsics::generate_intrinsics());
+
+    macro_rules! at {
+      ($e:expr) => {
+        state.0.at($e).unwrap()
+      };
+    }
+
+    macro_rules! apply {
+      ($e:expr) => {
+        state.eval(state.1.get(&$e.to_string()).unwrap()).unwrap();
+      };
+    }
+
+    apply!("ZERO");
+    assert_eq!(at!(1), 0u64.into());
+
+    apply!("ONE");
+    assert_eq!(at!(2), 0u64.into());
+    assert_eq!(at!(1), 1u64.into());
+
+    apply!("ONE");
+    apply!("PLUS");
+    assert_eq!(at!(1), 2u64.into());
+
+    apply!("SUB");
+    assert_eq!(at!(1), (-2i64).into());
+
+    apply!("NOT");
+    assert_eq!(at!(1), 1u64.into());
+
+    state.eval(Stmt::Push(4u64.into())).unwrap();
+    apply!("SHL");
+    assert_eq!(at!(1), 16u64.into());
   }
 }
