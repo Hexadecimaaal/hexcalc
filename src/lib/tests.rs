@@ -1,11 +1,11 @@
 #[cfg(test)]
 #[allow(non_snake_case)]
 mod expr {
-  use core::num::Wrapping;
+
 
   use crate::expr::*;
-  use crate::state::{Stack, State, Stmt, Variables};
-  use alloc::boxed::Box;
+  use crate::state::{Stack, State, Stmt};
+
   use alloc::string::ToString;
   use alloc::vec;
   use Expr::*;

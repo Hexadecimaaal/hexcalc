@@ -1,6 +1,6 @@
-use core::{num::Wrapping, ops::Not};
+use core::num::Wrapping;
 
-use alloc::{collections::BTreeMap, string::String, vec};
+use alloc::{collections::BTreeMap, string::String};
 
 use crate::{
   errors::Error,
@@ -8,6 +8,7 @@ use crate::{
   state::{State, Stmt, Variables},
 };
 
+#[allow(unused)]
 use num_traits::real::Real;
 
 pub fn generate_intrinsics() -> Variables {
@@ -39,7 +40,7 @@ pub fn generate_intrinsics() -> Variables {
       }
       intr.insert(
         stringify!($fun).to_uppercase(),
-        Command(&($fun as fn(&mut _) -> _)),
+        Command($fun as fn(&mut _) -> _),
       )
     };
   }
@@ -58,7 +59,7 @@ pub fn generate_intrinsics() -> Variables {
       }
       intr.insert(
         stringify!($fun).to_uppercase(),
-        Command(&($fun as fn(&mut _) -> _)),
+        Command($fun as fn(&mut _) -> _),
       )
     };
   }
@@ -67,7 +68,7 @@ pub fn generate_intrinsics() -> Variables {
     ($fun:ident = $stmt:expr) => {
       intr.insert(
         stringify!($fun).to_uppercase(),
-        Command(&($stmt as fn(&mut _) -> _)),
+        Command($stmt as fn(&mut _) -> _),
       );
     };
   }

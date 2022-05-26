@@ -91,14 +91,14 @@ impl Stack {
 #[derive(Clone)]
 pub enum Stmt {
   Push(Expr),
-  Command(&'static fn(&mut State) -> Result<(), Error>),
+  Command(fn(&mut State) -> Result<(), Error>),
 }
 
 impl core::fmt::Debug for Stmt {
   fn fmt(&self, f : &mut core::fmt::Formatter<'_>) -> Result<(), core::fmt::Error> {
     match self {
       Stmt::Push(e) => write!(f, "{:?}", e)?,
-      Stmt::Command(e) => write!(f, "#(command at {:?})", *e as *const _ as usize)?,
+      Stmt::Command(e) => write!(f, "#(command at {:?})", e as *const _ as usize)?,
     }
     Ok(())
   }

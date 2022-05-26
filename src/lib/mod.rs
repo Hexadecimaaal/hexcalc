@@ -1,5 +1,5 @@
 #![no_std]
-#![feature(box_syntax, box_patterns, let_chains)]
+#![feature(box_syntax, box_patterns)]
 #![feature(wrapping_int_impl)]
 extern crate alloc;
 

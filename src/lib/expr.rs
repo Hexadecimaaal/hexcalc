@@ -1,4 +1,4 @@
-use crate::{errors::Error, state::Stmt};
+use crate::{errors::Error, state::Stmt, typing::Type};
 use alloc::{boxed::Box, fmt::Display, format, string::String, vec, vec::Vec};
 use core::{num::Wrapping, panic};
 
@@ -26,7 +26,7 @@ impl PartialEq for Word64 {
 }
 
 impl Word64 {
-  fn format_i(&self) -> String {
+  pub fn format_i(&self) -> String {
     let i = unsafe { self.i };
     if i >= Wrapping(0) {
       format!("0+{:X}", i)
@@ -34,8 +34,8 @@ impl Word64 {
       format!("0-{:X}", i)
     }
   }
-  fn format_u(&self) -> String { format!("{:#X}", unsafe { self.u }) }
-  fn format_f(&self) -> String {
+  pub fn format_u(&self) -> String { format!("{:#X}", unsafe { self.u }) }
+  pub fn format_f(&self) -> String {
     let u = unsafe { self.u }.0;
     let frac = u << 12 >> 12;
     let exp = (u >> 52 & !(1 << 12)) as i16 - 1023;
@@ -81,24 +81,28 @@ pub enum Expr {
   Program(Vec<Stmt>),
 
   Unit,
+
+  Annotated(Box<Expr>, Type),
 }
 
 impl Display for Expr {
   fn fmt(&self, f : &mut alloc::fmt::Formatter<'_>) -> alloc::fmt::Result {
+    use Expr::*;
     match self {
-      Expr::Lam(bound, body) => write!(f, "λ{}. {}", bound, body),
-      Expr::Var(v) => write!(f, "{}", v),
-      Expr::App(func, val) => write!(f, "({} {})", func, val),
-      Expr::Cons(lhs, rhs) => write!(f, "{{{} {}}}", lhs, rhs),
-      Expr::Fst(e) => write!(f, "{}.0", e),
-      Expr::Snd(e) => write!(f, "{}.1", e),
-      Expr::Match(with, inl, inr) => write!(f, "match {} with {} | {} end", with, inl, inr),
-      Expr::Inl(e) => write!(f, "{}:0", e),
-      Expr::Inr(e) => write!(f, "{}:1", e),
-      Expr::Program(p) => todo!(),
-      Expr::Word(w) => w.fmt(f),
-      Expr::Text(t) => t.fmt(f),
-      Expr::Unit => write!(f, "*"),
+      Lam(bound, body) => write!(f, "λ{}. {}", bound, body),
+      Var(v) => write!(f, "{}", v),
+      App(func, val) => write!(f, "({} {})", func, val),
+      Cons(lhs, rhs) => write!(f, "{{{} {}}}", lhs, rhs),
+      Fst(e) => write!(f, "{}.0", e),
+      Snd(e) => write!(f, "{}.1", e),
+      Match(with, inl, inr) => write!(f, "match {} with {} | {} end", with, inl, inr),
+      Inl(e) => write!(f, "{}:0", e),
+      Inr(e) => write!(f, "{}:1", e),
+      Program(p) => todo!(),
+      Word(w) => w.fmt(f),
+      Text(t) => t.fmt(f),
+      Unit => write!(f, "*"),
+      Annotated(e, t) => todo!(),
     }
   }
 }
@@ -165,7 +169,7 @@ impl Expr {
           .collect::<Result<Vec<Stmt>, Error>>()?,
       )),
       Cons(fst, snd) => Ok(Cons(box fst.subst(name, to)?, box snd.subst(name, to)?)),
-      Fst(e) | Snd(e) | Inl(e) | Inr(e) => e.subst(name, to),
+      Fst(e) | Snd(e) | Inl(e) | Inr(e) | Annotated(e, _) => e.subst(name, to),
       Match(with, inl, inr) => Ok(Match(
         box with.subst(name, to)?,
         box inl.subst(name, to)?,
@@ -184,7 +188,7 @@ impl Expr {
       Fst(box Cons(..)) | Snd(box Cons(..)) => true,
       Fst(e) | Snd(e) => e.redux(),
       Match(box Inl(_), ..) | Match(box Inr(_), ..) => true,
-      Match(e, ..) | Inl(e) | Inr(e) => e.redux(),
+      Match(e, ..) | Inl(e) | Inr(e) | Annotated(e, _) => e.redux(),
     }
   }
 
@@ -207,12 +211,16 @@ impl Expr {
       }
 
       Fst(box Cons(this, _)) | Snd(box Cons(_, this)) => Ok(*this),
-      Fst(e) | Snd(e) => e.red(),
+      Fst(e) => Ok(Fst(box e.red()?)),
+      Snd(e) => Ok(Snd(box e.red()?)),
 
       Match(box Inl(x), this, _) | Match(box Inr(x), _, this) => Ok(App(this, x)),
       Match(e, inl, inr) => Ok(Match(box e.red()?, inl, inr)),
 
-      Inl(e) | Inr(e) => e.red(),
+      Inl(e) => Ok(Inl(box e.red()?)),
+      Inr(e) => Ok(Inr(box e.red()?)),
+
+      Annotated(e, t) => Ok(e.red()?),
 
       _ => {
         if self.redux() {
