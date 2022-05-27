@@ -1,8 +1,5 @@
-use crate::expr::Expr;
-use crate::typing::{Type};
-use alloc::boxed::Box;
-use alloc::string::String;
-use alloc::vec::Vec;
+use crate::{expr::Expr, typing::Type};
+use alloc::{boxed::Box, string::String, vec::Vec};
 
 pub trait Err: alloc::fmt::Debug {}
 
@@ -28,6 +25,10 @@ impl CheckingError for Cyclic {}
 #[derive(Clone, Debug, PartialEq)]
 pub struct Unbound(pub Type);
 impl CheckingError for Unbound {}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Untyped(pub String);
+impl CheckingError for Untyped {}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Subtype(pub Type, pub Type);

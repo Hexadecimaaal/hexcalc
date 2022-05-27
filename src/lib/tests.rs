@@ -2,12 +2,12 @@
 #[allow(non_snake_case)]
 mod expr {
 
+  use crate::{
+    expr::*,
+    state::{Stack, State, Stmt},
+  };
 
-  use crate::expr::*;
-  use crate::state::{Stack, State, Stmt};
-
-  use alloc::string::ToString;
-  use alloc::vec;
+  use alloc::{string::ToString, vec};
   use Expr::*;
   // use Primitive::*;
 

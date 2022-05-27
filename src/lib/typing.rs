@@ -1,20 +1,22 @@
-use alloc::vec;
 use alloc::{
   boxed::Box,
   string::{String, ToString},
+  vec,
   vec::Vec,
 };
 
-use crate::errors::{Cyclic, Incomplete, Subtype, Unbound};
-use crate::{errors::CheckingError, expr::Expr};
+use crate::{
+  errors::{CheckingError, Cyclic, Incomplete, Subtype, Unbound, Untyped},
+  expr::Expr,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
   Arrow(Box<Type>, Box<Type>),
   Word,
   Text,
-  Unit,
-  Empty,
+  Top,
+  Bottom,
   Pair(Box<Type>, Box<Type>),
   Either(Box<Type>, Box<Type>),
 
@@ -26,7 +28,7 @@ pub enum Type {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Condition {
   UVar(String),
-  Typing(Expr, Type),
+  Typing(String, Type),
   EVar(String),
   Instantiate(String, Type),
   Mark(String),
@@ -96,6 +98,17 @@ impl Context {
     Ok(pivot)
   }
 
+  fn find_typing(&self, var : &str) -> Result<&Type, Box<Untyped>> {
+    for c in self.0.iter() {
+      if let Condition::Typing(v, ty) = c {
+        if v == var {
+          return Ok(ty);
+        }
+      }
+    }
+    Err(box Untyped(var.to_string()))
+  }
+
   pub fn solve(&mut self, evar : &str, solution : Type) -> Result<(), Box<dyn CheckingError>> {
     let prefix = self.find_evar(evar)?;
     self.well_formed(prefix)?;
@@ -138,13 +151,22 @@ impl Type {
     }
   }
 
-  pub fn instantiate(self, uvar : &str, evar : &str) -> Type {
+  pub fn instantiate_uvar(self, uvar : &str, evar : &str) -> Type {
     use Type::*;
     match self {
-      Arrow(box a, box b) => Arrow(box a.instantiate(uvar, evar), box b.instantiate(uvar, evar)),
-      Either(box a, box b) => Either(box a.instantiate(uvar, evar), box b.instantiate(uvar, evar)),
-      Pair(box a, box b) => Pair(box a.instantiate(uvar, evar), box b.instantiate(uvar, evar)),
-      Word | Text | Unit | Empty | EVar(_) => self,
+      Arrow(box a, box b) => Arrow(
+        box a.instantiate_uvar(uvar, evar),
+        box b.instantiate_uvar(uvar, evar),
+      ),
+      Either(box a, box b) => Either(
+        box a.instantiate_uvar(uvar, evar),
+        box b.instantiate_uvar(uvar, evar),
+      ),
+      Pair(box a, box b) => Pair(
+        box a.instantiate_uvar(uvar, evar),
+        box b.instantiate_uvar(uvar, evar),
+      ),
+      Word | Text | Top | Bottom | EVar(_) => self,
       UVar(ref u) => {
         if u == uvar {
           EVar(evar.to_string())
@@ -156,7 +178,7 @@ impl Type {
         if u == uvar {
           Forall(u, box a)
         } else {
-          Forall(u, box a.instantiate(uvar, evar))
+          Forall(u, box a.instantiate_uvar(uvar, evar))
         }
       }
     }
@@ -165,7 +187,7 @@ impl Type {
   pub fn subst(self, ctx : &[Condition]) -> Self {
     use Type::*;
     match self {
-      Word | Text | Unit | Empty | UVar(_) => self,
+      Word | Text | Top | Bottom | UVar(_) => self,
       Arrow(box a, box b) => Arrow(box a.subst(ctx), box b.subst(ctx)),
       Pair(box a, box b) => Pair(box a.subst(ctx), box b.subst(ctx)),
       Either(box a, box b) => Either(box a.subst(ctx), box b.subst(ctx)),
@@ -194,7 +216,7 @@ impl Type {
         a.well_formed_(ctx, uvars)?;
         b.well_formed_(ctx, uvars)
       }
-      Word | Text | Unit | Empty => Ok(()),
+      Word | Text | Top | Bottom => Ok(()),
       UVar(u) => {
         for c in ctx.iter() {
           if let Condition::UVar(uvar) = c {
@@ -244,7 +266,7 @@ impl Type {
           Err(box Cyclic(EVar(evar.to_string()), self.clone()))
         }
       }
-      Word | Text | Unit | Empty | UVar(_) => Ok(()),
+      Word | Text | Top | Bottom | UVar(_) => Ok(()),
       Forall(_, box ty) => ty
         .free_evar(evar)
         .map_err(|box Cyclic(evar, _)| box Cyclic(evar, self.clone())),
@@ -265,7 +287,7 @@ impl Type {
           Err(box Cyclic(UVar(uvar.to_string()), self.clone()))
         }
       }
-      Word | Text | Unit | Empty | EVar(_) => Ok(()),
+      Word | Text | Top | Bottom | EVar(_) => Ok(()),
       Forall(_, box ty) => ty
         .free_uvar(uvar)
         .map_err(|box Cyclic(evar, _)| box Cyclic(evar, self.clone())),
@@ -279,7 +301,6 @@ impl Type {
   pub fn subtype(self, other : Type, ctx : &mut Context) -> Result<(), Box<dyn CheckingError>> {
     use Type::*;
     match (self, other) {
-      (Unit, Unit) => Ok(()),
       (UVar(u), UVar(v)) if u == v => {
         ctx.mentioned(&Condition::UVar(u.clone()))?;
         Ok(())
@@ -289,6 +310,16 @@ impl Type {
         Ok(())
       }
       (Arrow(box t1, box t2), Arrow(box u1, box u2)) => {
+        u1.subtype(t1, ctx)?;
+        t2.subst(&ctx.0).subtype(u2.subst(&ctx.0), ctx)?;
+        Ok(())
+      }
+      (Pair(box t1, box t2), Pair(box u1, box u2)) => {
+        t1.subtype(u1, ctx)?;
+        t2.subst(&ctx.0).subtype(u2.subst(&ctx.0), ctx)?;
+        Ok(())
+      }
+      (Either(box t1, box t2), Either(box u1, box u2)) => {
         t1.subtype(u1, ctx)?;
         t2.subst(&ctx.0).subtype(u2.subst(&ctx.0), ctx)?;
         Ok(())
@@ -297,15 +328,25 @@ impl Type {
         let evar = ctx.fresh(&a);
         ctx.0.push(Condition::Mark(evar.clone()));
         ctx.0.push(Condition::EVar(evar.clone()));
-        t.instantiate(&a, &evar).subtype(u, ctx)?;
+        t.instantiate_uvar(&a, &evar).subtype(u, ctx)?;
         ctx.drop_after(&Condition::Mark(evar));
         Ok(())
       }
+      (a, b) if a == b => Ok(()),
+      (Bottom, _) => Ok(()),
       (t, Forall(a, box u)) => {
         ctx.0.push(Condition::UVar(a.clone()));
         t.subtype(u, ctx)?;
         ctx.drop_after(&Condition::UVar(a));
         Ok(())
+      }
+      (EVar(evar), t) => {
+        t.free_evar(&evar)?;
+        t.instantiate_super(&evar, ctx)
+      }
+      (t, EVar(evar)) => {
+        t.free_evar(&evar)?;
+        t.instantiate_sub(&evar, ctx)
       }
       (l, r) => Err(box Subtype(l.clone(), r.clone())),
     }
@@ -383,7 +424,68 @@ impl Type {
     evar : &str,
     ctx : &mut Context,
   ) -> Result<(), Box<dyn CheckingError>> {
-    todo!()
+    use Type::*;
+    match self {
+      Arrow(box t, box u) => {
+        ctx.find_evar(evar)?;
+        let et = ctx.fresh(evar);
+        let eu = ctx.fresh(evar);
+        ctx.insert(Condition::EVar(eu.clone()), evar)?;
+        ctx.insert(Condition::EVar(et.clone()), evar)?;
+        ctx.solve(
+          evar,
+          Type::Arrow(box Type::EVar(et.clone()), box Type::EVar(eu.clone())),
+        )?;
+        t.instantiate_super(&et, ctx)?;
+        u.instantiate_sub(&eu, ctx)?;
+        Ok(())
+      }
+      Pair(box t, box u) => {
+        ctx.find_evar(evar)?;
+        let et = ctx.fresh(evar);
+        let eu = ctx.fresh(evar);
+        ctx.insert(Condition::EVar(eu.clone()), evar)?;
+        ctx.insert(Condition::EVar(et.clone()), evar)?;
+        ctx.solve(
+          evar,
+          Type::Pair(box Type::EVar(et.clone()), box Type::EVar(eu.clone())),
+        )?;
+        t.instantiate_sub(&et, ctx)?;
+        u.instantiate_sub(&eu, ctx)?;
+        Ok(())
+      }
+      Either(box t, box u) => {
+        ctx.find_evar(evar)?;
+        let et = ctx.fresh(evar);
+        let eu = ctx.fresh(evar);
+        ctx.insert(Condition::EVar(eu.clone()), evar)?;
+        ctx.insert(Condition::EVar(et.clone()), evar)?;
+        ctx.solve(
+          evar,
+          Type::Either(box Type::EVar(et.clone()), box Type::EVar(eu.clone())),
+        )?;
+        t.instantiate_sub(&et, ctx)?;
+        u.instantiate_sub(&eu, ctx)?;
+        Ok(())
+      }
+      EVar(e) if ctx.find_evar(&e)? > ctx.find_evar(evar)? => {
+        ctx.solve(&e, Type::EVar(evar.to_string()))
+      }
+      Forall(a, box t) => {
+        ctx.mentioned(&Condition::EVar(evar.to_string()))?;
+        let evar = ctx.fresh(&a);
+        ctx.0.push(Condition::Mark(evar.clone()));
+        ctx.0.push(Condition::EVar(evar.clone()));
+        t.instantiate_uvar(&a, &evar).instantiate_sub(&evar, ctx)?;
+        ctx.drop_after(&Condition::Mark(evar));
+        Ok(())
+      }
+      _ => {
+        self.well_formed(&ctx.0)?;
+        ctx.solve(evar, self)?;
+        Ok(())
+      }
+    }
   }
 }
 
@@ -391,7 +493,7 @@ impl Condition {
   pub fn free(&self, ty : &Type) -> bool {
     use Type::*;
     match ty {
-      Word | Text | Unit | Empty | Forall(..) => true,
+      Word | Text | Top | Bottom | Forall(..) => true,
       Arrow(box a, box b) | Pair(box a, box b) | Either(box a, box b) => {
         self.free(a) && self.free(b)
       }
@@ -463,4 +565,75 @@ impl Condition {
       EVar(evar) | Instantiate(evar, _) | Mark(evar) => to.free_evar(evar),
     }
   }
+}
+
+trait Typed {
+  fn check(self, ty : Type, ctx : &mut Context) -> Result<(), Box<dyn CheckingError>>;
+  fn infer(self, ctx : &mut Context) -> Result<Type, Box<dyn CheckingError>>;
+  fn apply(self, ty : Type, ctx : &mut Context) -> Result<Type, Box<dyn CheckingError>>;
+}
+
+impl Typed for Expr {
+  fn check(self, ty : Type, ctx : &mut Context) -> Result<(), Box<dyn CheckingError>> {
+    use Expr::*;
+    use Type::*;
+    match (self, ty) {
+      (Lam(x, box e), Arrow(box a, box b)) => {
+        ctx.0.push(Condition::Typing(x.clone(), a.clone()));
+        e.check(b, ctx)?;
+        ctx.drop_after(&Condition::Typing(x, a));
+        Ok(())
+      }
+      (Cons(box fst, box snd), Pair(box a, box b)) => {
+        fst.check(a, ctx)?;
+        snd.check(b, ctx)
+      }
+      (Inl(box e), Either(box a, _)) => e.check(a, ctx),
+      (Inr(box e), Either(_, box b)) => e.check(b, ctx),
+      (e, Forall(a, box ty)) => {
+        ctx.0.push(Condition::UVar(a.clone()));
+        e.check(ty, ctx)?;
+        ctx.drop_after(&Condition::UVar(a));
+        Ok(())
+      }
+      (e, ty) => {
+        let sub = e.infer(ctx)?.subst(&ctx.0);
+        let ty = ty.subst(&ctx.0);
+        sub.subtype(ty, ctx)
+      }
+    }
+  }
+
+  fn infer(self, ctx : &mut Context) -> Result<Type, Box<dyn CheckingError>> {
+    use Expr::*;
+    match self {
+      Lam(x, box e) => {
+        let evar1 = ctx.fresh(&x);
+        let evar2 = ctx.fresh("body");
+        ctx.0.push(Condition::EVar(evar1.clone()));
+        ctx.0.push(Condition::EVar(evar2.clone()));
+        ctx.0.push(Condition::Typing(x, Type::EVar(evar1.clone())));
+        e.check(Type::EVar(evar2.clone()), ctx)?;
+        Ok(Type::Arrow(box Type::EVar(evar1), box Type::EVar(evar2)))
+      }
+      Var(v) => Ok(ctx.find_typing(&v)?.clone()),
+      App(..) => todo!(),
+      Cons(box fst, box snd) => Ok(Type::Pair(box fst.infer(ctx)?, box snd.infer(ctx)?)),
+      Fst(_) => todo!(),
+      Snd(_) => todo!(),
+      Match(..) => todo!(),
+      Inl(_) => todo!(),
+      Inr(_) => todo!(),
+      Program(_) => todo!(),
+      Unit => Ok(Type::Top),
+      Word(_) => Ok(Type::Word),
+      Text(_) => Ok(Type::Text),
+      Annotated(box e, ty) => {
+        e.check(ty.clone(), ctx)?;
+        Ok(ty)
+      }
+    }
+  }
+
+  fn apply(self, ty : Type, ctx : &mut Context) -> Result<Type, Box<dyn CheckingError>> { todo!() }
 }
