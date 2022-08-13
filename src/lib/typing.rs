@@ -52,7 +52,7 @@ impl Context {
     }
   }
 
-  pub fn well_formed(&self, prefix : usize) -> Result<(), Box<dyn CheckingError>> {
+  fn well_formed(&self, prefix : usize) -> Result<(), Box<dyn CheckingError>> {
     if prefix == 0 {
       return Ok(());
     } else {
@@ -77,7 +77,7 @@ impl Context {
     Ok(())
   }
 
-  pub fn mentioned(&self, cond : &Condition) -> Result<(), Box<dyn CheckingError>> {
+  fn mentioned(&self, cond : &Condition) -> Result<(), Box<dyn CheckingError>> {
     for c in self.0.iter() {
       if c == cond {
         return Ok(());
@@ -112,7 +112,9 @@ impl Context {
   pub fn solve(&mut self, evar : &str, solution : Type) -> Result<(), Box<dyn CheckingError>> {
     let prefix = self.find_evar(evar)?;
     self.well_formed(prefix)?;
-    solution.well_formed(&self.0[..prefix - 1])?;
+    if prefix > 0 {
+      solution.well_formed(&self.0[..prefix - 1])?;
+    }
     self.0[prefix] = Condition::Instantiate(evar.to_string(), solution);
     Ok(())
   }
@@ -145,9 +147,11 @@ impl Context {
 
 impl Type {
   pub fn mono(&self) -> bool {
+    use Type::*;
     match self {
-      Type::Forall(..) => false,
-      _ => true,
+      Forall(..) => false,
+      Arrow(box a, box b) | Pair(box a, box b) | Either(box a, box b) => a.mono() && b.mono(),
+      Word | Text | Top | Bottom | UVar(_) | EVar(_) => true,
     }
   }
 
@@ -617,7 +621,10 @@ impl Typed for Expr {
         Ok(Type::Arrow(box Type::EVar(evar1), box Type::EVar(evar2)))
       }
       Var(v) => Ok(ctx.find_typing(&v)?.clone()),
-      App(..) => todo!(),
+      App(box func, box val) => {
+        let f = func.infer(ctx)?.subst(&ctx.0[..]);
+        val.apply(f, ctx)
+      }
       Cons(box fst, box snd) => Ok(Type::Pair(box fst.infer(ctx)?, box snd.infer(ctx)?)),
       Fst(_) => todo!(),
       Snd(_) => todo!(),
@@ -635,5 +642,37 @@ impl Typed for Expr {
     }
   }
 
-  fn apply(self, ty : Type, ctx : &mut Context) -> Result<Type, Box<dyn CheckingError>> { todo!() }
+  fn apply(self, ty : Type, ctx : &mut Context) -> Result<Type, Box<dyn CheckingError>> {
+    use Type::*;
+    match ty {
+      Arrow(box a, box b) => {
+        self.check(a, ctx)?;
+        Ok(b)
+      }
+      Word => todo!(),
+      Text => todo!(),
+      Top => todo!(),
+      Bottom => todo!(),
+      Pair(..) => todo!(),
+      Either(..) => todo!(),
+      UVar(_) => todo!(),
+      EVar(evar) => {
+        let evb = ctx.fresh(evar.as_str());
+        ctx.insert(Condition::EVar(evb.clone()), evar.as_str())?;
+        let eva = ctx.fresh(evar.as_str());
+        ctx.insert(Condition::EVar(eva.clone()), evar.as_str())?;
+        ctx.solve(
+          evar.as_str(),
+          Arrow(box EVar(eva.clone()), box EVar(evb.clone())),
+        )?;
+        self.check(EVar(eva), ctx)?;
+        Ok(EVar(evb))
+      }
+      Forall(uvar, box ty) => {
+        let evar = ctx.fresh(uvar.as_str());
+        ctx.0.push(Condition::EVar(evar.clone()));
+        self.apply(ty.instantiate_uvar(uvar.as_str(), evar.as_str()), ctx)
+      }
+    }
+  }
 }

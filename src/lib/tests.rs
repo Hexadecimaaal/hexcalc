@@ -5,6 +5,7 @@ mod expr {
   use crate::{
     expr::*,
     state::{Stack, State, Stmt},
+    typing::{Condition, Context, Type},
   };
 
   use alloc::{string::ToString, vec};
@@ -101,5 +102,64 @@ mod expr {
     state.eval(Stmt::Push(4u64.into())).unwrap();
     apply!("SHL");
     assert_eq!(at!(1), 16u64.into());
+  }
+
+  #[test]
+  fn condition() {
+    use Condition::*;
+    EVar("eee".to_string())
+      .no_shadow(&EVar("eee".to_string()))
+      .unwrap_err();
+    UVar("eee".to_string())
+      .no_shadow(&EVar("eee".to_string()))
+      .unwrap();
+    UVar("eee".to_string())
+      .no_shadow(&UVar("fff".to_string()))
+      .unwrap();
+    Mark("eee".to_string())
+      .no_shadow(&UVar("eee".to_string()))
+      .unwrap();
+    Mark("eee".to_string())
+      .no_shadow(&EVar("eee".to_string()))
+      .unwrap_err();
+    Instantiate("eee".to_string(), Type::UVar("fff".to_string()))
+      .no_shadow(&EVar("eee".to_string()))
+      .unwrap_err();
+    Instantiate("fff".to_string(), Type::UVar("eee".to_string()))
+      .no_shadow(&EVar("eee".to_string()))
+      .unwrap();
+  }
+
+  #[test]
+  fn context() {
+    use Condition::*;
+    Context(vec![]).completed().unwrap();
+    // Context(vec![]).mentioned(&Condition::EVar("something".to_string())).
+    // unwrap_err();
+    Context(vec![EVar("something".to_string())])
+      .completed()
+      .unwrap_err();
+    Context(vec![UVar("something".to_string())])
+      .completed()
+      .unwrap();
+
+    let mut ctx = Context(vec![EVar("eee".to_string())]);
+    ctx.solve("something", Type::Top).unwrap_err();
+    ctx.solve("eee", Type::Bottom).unwrap();
+    assert_eq!(ctx.0, vec![Instantiate("eee".to_string(), Type::Bottom)]);
+    ctx.insert(Mark("eee".to_string()), "eee").unwrap();
+    assert_eq!(
+      ctx.0,
+      vec![
+        Mark("eee".to_string()),
+        Instantiate("eee".to_string(), Type::Bottom)
+      ]
+    );
+    assert_eq!(ctx.fresh("eee"), "eee0".to_string());
+    ctx.0.push(Instantiate("eee0".to_string(), Type::Text));
+    assert_eq!(ctx.fresh("eee"), "eee1".to_string());
+    ctx.0.insert(0, Typing("v".to_string(), Type::Word));
+    ctx.drop_after(&Mark("eee".to_string()));
+    assert_eq!(ctx.0, vec![Typing("v".to_string(), Type::Word)]);
   }
 }
