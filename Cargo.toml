@@ -9,8 +9,13 @@ edition = "2021"
 rp-pico = "0.3.0"
 alloc-cortex-m = "0.4.2"
 num-traits = { version = "0.2.15", default-features = false, features = ["libm"] }
+nom = { version = "7.1.1", default-features = false, features = ["alloc"] }
 
 [lib]
 name = "libhexcalc"
 path = "src/lib/mod.rs"
 test = true
+
+[[bin]]
+name = "hexcalc-tui"
+path = "src/tui/main.rs"

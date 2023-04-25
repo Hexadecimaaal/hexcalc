@@ -14,6 +14,8 @@ pub mod intrinsics;
 pub mod state;
 pub mod typing;
 
+pub mod parsing;
+
 pub mod tests;
 
 // use alloc::collections::VecDeque;

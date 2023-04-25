@@ -31,7 +31,7 @@ impl Word64 {
     if i >= Wrapping(0) {
       format!("0+{:X}", i)
     } else {
-      format!("0-{:X}", i)
+      format!("0-{:X}", -i)
     }
   }
   pub fn format_u(&self) -> String { format!("{:#X}", unsafe { self.u }) }
